@@ -1,0 +1,29 @@
+# There is no information available that is required to manage gpu sensors or fans.
+# Only CPU sensors and fans are supported.
+[fan]
+min = 0              # Units: RPM
+max = 5500
+ramp_rate = 500      # Units: RPM/step
+step_delay_ms = 1000 # Units: milliseconds
+hold_threshold = 3   # Units: Degrees Celsius. Ignore tmperature changes within this range.
+
+
+[[curve]]
+temp = 40
+speed = 800
+
+[[curve]]
+temp = 50
+speed = 2000
+
+[[curve]]
+temp = 60
+speed = 3600
+
+[[curve]]
+temp = 70
+speed = 4500
+
+[[curve]]
+temp = 85
+speed = 5500
