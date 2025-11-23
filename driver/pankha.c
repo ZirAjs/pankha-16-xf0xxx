@@ -24,12 +24,14 @@ struct file_operations *fops;
 
 // EC REGISTER MAPPINGS
 #define REG_GET_FAN_SPEED 0x11
-#define REG_CONTROLLER 0x15
-#define REG_SET_FAN_SPEED 0x19
+#define REG_CONTROLLER 0x0f
+#define REG_SET_FAN_SPEED 0x14
 
 #define MAX_FAN_SPEED 5500
-#define BIOS_CONTROLLER 0
-#define USER_CONTROLLER 1
+// xf0xxx uses REG15 ^= 0x8 for controller
+#define CONTROLLER_MASK 0x8
+#define BIOS_CONTROLLER 0x0
+#define USER_CONTROLLER 0x1
 
 // CONVERSION MACROS
 #define BYTE_TO_RPM(byte) ((byte) * 100)
@@ -45,14 +47,12 @@ struct file_operations *fops;
 static DEFINE_MUTEX(pankha_mutex);
 
 const struct dmi_system_id pankha_whitelist[] = {
-  {
-    .ident = "Supported boards",
-    .matches = {
-      DMI_MATCH(DMI_BOARD_NAME, "8C78")
+    {
+        .ident = "Supported boards",
+        .matches = {
+            DMI_MATCH(DMI_BOARD_NAME, "8BCA")},
     },
-  },
-  {}
-};
+    {}};
 
 // HELPER FUNCTION DECLARATIONS
 int _int_get_fan_speed(void);
@@ -62,11 +62,13 @@ int set_controller(int controller);
 int set_fan_speed(int speed);
 
 // HELPER FUNCTION DEFINITIONS
-int _int_get_fan_speed(void) {
+int _int_get_fan_speed(void)
+{
   u8 byte;
   int err, speed;
   err = ec_read(REG_GET_FAN_SPEED, &byte);
-  if (err) {
+  if (err)
+  {
     pr_err("[pankha] error reading fan speed\n");
     return -EIO;
   }
@@ -74,39 +76,52 @@ int _int_get_fan_speed(void) {
   return speed;
 }
 
-int get_fan_speed(int __user *addr) {
+int get_fan_speed(int __user *addr)
+{
   int speed, ret;
   ret = _int_get_fan_speed();
   if (ret < 0)
     return ret;
   speed = ret;
   ret = copy_to_user(addr, &speed, sizeof(speed));
-  if (ret != 0) {
+  if (ret != 0)
+  {
     pr_err("[pankha] failed to copy fan speed to userspace\n");
     return -EFAULT;
   }
   return 0;
 }
 
-int get_controller(int __user *addr) {
+int get_controller(int __user *addr)
+{
   u8 byte;
   int err, ret;
   err = ec_read(REG_CONTROLLER, &byte);
-  if (err) {
+  if (err)
+  {
     pr_err("[pankha] error reading controller\n");
     return err;
   }
+  // User is expecting 0 or 1
+  if (byte & CONTROLLER_MASK)
+    byte = USER_CONTROLLER;
+  else
+    byte = BIOS_CONTROLLER;
   ret = copy_to_user(addr, &byte, sizeof(byte));
-  if (ret != 0) {
+  if (ret != 0)
+  {
     pr_err("[pankha] failed to copy controller to userspace\n");
     return -EFAULT;
   }
   return 0;
 }
 
-int set_controller(int controller) {
+int set_controller(int controller)
+{
+  u8 byte;
   int err, res, speed;
-  if (controller != BIOS_CONTROLLER && controller != USER_CONTROLLER) {
+  if (controller != BIOS_CONTROLLER && controller != USER_CONTROLLER)
+  {
     pr_err("[pankha] invalid controller\n");
     return -EINVAL;
   }
@@ -115,7 +130,8 @@ int set_controller(int controller) {
    * user-controlled fan speed register before changing the controller as the
    * fan speed may be invalid, leading to over/under performing fans.
    */
-  if (controller == USER_CONTROLLER) {
+  if (controller == USER_CONTROLLER)
+  {
     res = _int_get_fan_speed();
     if (res < 0)
       return res;
@@ -124,35 +140,51 @@ int set_controller(int controller) {
     if (err)
       return err;
   }
-  err = ec_write(REG_CONTROLLER, controller);
-  if (err) {
+  err = ec_read(REG_CONTROLLER, &byte);
+  if (err)
+  {
+    pr_err("[pankha] error reading controller\n");
+    return err;
+  }
+  if (controller == USER_CONTROLLER)
+    byte |= CONTROLLER_MASK;
+  else
+    byte &= ~CONTROLLER_MASK;
+  err = ec_write(REG_CONTROLLER, byte);
+  if (err)
+  {
     pr_err("[pankha] failed to change controller\n");
     return err;
   }
   return 0;
 }
 
-int set_fan_speed(int speed) {
+int set_fan_speed(int speed)
+{
   u8 byte;
   int err;
-  if (speed < 0 || MAX_FAN_SPEED < speed) {
+  if (speed < 0 || MAX_FAN_SPEED < speed)
+  {
     pr_err("[pankha] invalid fan speed range\n");
     return -EINVAL;
   }
   byte = RPM_TO_BYTE(speed);
   err = ec_write(REG_SET_FAN_SPEED, byte);
-  if (err) {
+  if (err)
+  {
     pr_err("[pankha] failed to set fan speed\n");
     return err;
   }
   return 0;
 }
 
-static long pankha_ioctl(struct file *fp, unsigned int cmd, unsigned long arg) {
+static long pankha_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
+{
   int err;
   err = 0;
   mutex_lock(&pankha_mutex);
-  switch (cmd) {
+  switch (cmd)
+  {
   case IOCTL_GET_FAN_SPEED:
     err = get_fan_speed((int *)arg);
     if (err)
@@ -183,19 +215,23 @@ out:
   return err;
 }
 
-static int __init pankha_init(void) {
+static int __init pankha_init(void)
+{
   int ret;
-  if (!dmi_check_system(pankha_whitelist)) {
+  if (!dmi_check_system(pankha_whitelist))
+  {
     pr_err("[pankha] unsupported device: %s\n", dmi_get_system_info(DMI_BOARD_NAME));
     return -ENODEV;
   }
   misc = kzalloc(sizeof(struct miscdevice), GFP_KERNEL);
-  if (misc == NULL) {
+  if (misc == NULL)
+  {
     pr_err("[pankha] failed to allocate memory for miscdevice\n");
     return -ENOMEM;
   }
   fops = kzalloc(sizeof(struct file_operations), GFP_KERNEL);
-  if (fops == NULL) {
+  if (fops == NULL)
+  {
     pr_err("[pankha] failed to allocate memory for fops\n");
     return -ENOMEM;
   }
@@ -205,7 +241,8 @@ static int __init pankha_init(void) {
   fops->owner = THIS_MODULE;
   fops->unlocked_ioctl = pankha_ioctl;
   ret = misc_register(misc);
-  if (ret < 0) {
+  if (ret < 0)
+  {
     pr_err("[pankha] failed to register miscdevice\n");
     kfree(misc);
     kfree(fops);
@@ -215,7 +252,8 @@ static int __init pankha_init(void) {
   return 0;
 }
 
-static void __exit pankha_exit(void) {
+static void __exit pankha_exit(void)
+{
   misc_deregister(misc);
   kfree(misc);
   kfree(fops);

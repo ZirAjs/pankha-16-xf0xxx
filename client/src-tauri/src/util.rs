@@ -29,33 +29,61 @@ pub fn ensure_pankha() -> Result<(), String> {
 #[allow(dead_code)]
 #[tauri::command]
 pub fn get_cpu_temp() -> i32 {
-    let sensors = lm_sensors::Initializer::default().initialize().unwrap();
+    use lm_sensors::Initializer;
 
-    let coretemp_chip = sensors
+    // 1. Initialize lm_sensors safely
+    let sensors = match Initializer::default().initialize() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    // 2. Find a suitable chip:
+    let chip = match sensors
         .chip_iter(None)
-        .find(|chip| chip.to_string() == "coretemp-isa-0000")
-        .unwrap();
+        .find(|chip| {
+            let name = chip.to_string();
+            name.starts_with("k10temp-") || name == "acpitz-acpi-0"
+        })
+    {
+        Some(chip) => chip,
+        None => return -1,
+    };
 
-    let package_feature = coretemp_chip
+    // 3. Pick a feature that looks like a CPU temperature.
+    let feature = match chip
         .feature_iter()
-        .find(|f| f.to_string() == "Package id 0")
-        .unwrap();
+        .find(|f| {
+            let label = f.to_string();
+            label == "Tctl" || label == "Tdie" || label == "temp1"
+        })
+    {
+        Some(f) => f,
+        None => return -1,
+    };
 
-    let temp_sub_feature = package_feature
+    // 4. Find the corresponding *input subfeature, e.g. temp1_input
+    let sub_feature = match feature
         .sub_feature_iter()
-        .find(|s| s.to_string() == "temp1_input")
-        .unwrap();
+        .find(|s| s.to_string().ends_with("_input"))
+    {
+        Some(s) => s,
+        None => return -1,
+    };
 
-    let cpu_temp = temp_sub_feature
-        .value()
-        .unwrap()
-        .to_string()
+    // 5. Read and parse the value ("50.8 C" -> 51)
+    let raw = match sub_feature.value() {
+        Ok(v) => v.to_string(),
+        Err(_) => return -1,
+    };
+
+    let temp = raw
         .split_whitespace()
         .next()
-        .and_then(|s| s.parse::<i32>().ok())
+        .and_then(|s| s.parse::<f32>().ok())
+        .map(|t| t.round() as i32)
         .unwrap_or(-1);
 
-    cpu_temp
+    temp
 }
 
 const DATA_FETCHER_FREQ: Duration = Duration::from_secs(1);

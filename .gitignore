@@ -23,4 +23,16 @@ dist-ssr
 *.sln
 *.sw?
 
+# build files
+*.cmd
+*.o
+*.mod
+*.mod.*
+Module.symvers
+modules.order
+
+# kernel module
+*.ko
+
+
 .cache
